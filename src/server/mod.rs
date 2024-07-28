@@ -1,5 +1,4 @@
 use hyperborealib::drivers::prelude::*;
-use hyperborealib::exports::axum::middleware;
 use hyperborealib::rest_api::prelude::*;
 use hyperborealib::port_forward::*;
 
