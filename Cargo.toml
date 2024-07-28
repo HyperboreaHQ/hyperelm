@@ -25,7 +25,7 @@ full = [
     "hyperborealib/full"
 ]
 
-default = ["serde", "tracing"]
+default = ["full"]
 
 [dependencies.hyperborealib]
 git = "https://github.com/HyperboreaHQ/hyperborealib"

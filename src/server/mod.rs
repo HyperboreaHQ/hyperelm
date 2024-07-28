@@ -1,5 +1,7 @@
 use hyperborealib::drivers::prelude::*;
+use hyperborealib::exports::axum::middleware;
 use hyperborealib::rest_api::prelude::*;
+use hyperborealib::port_forward::*;
 
 mod params;
 mod app;
@@ -25,19 +27,41 @@ where
 {
     let params = app.get_params();
 
-    // Create client middlewire for traversal thread
+    // Resolve server middleware and driver
+    let middleware = app.get_middleware().await
+        .expect("Failed to obtain application middleware");
+
+    let driver = middleware.driver();
+
+    // Create client middleware for traversal thread
     let traversal_client = ClientMiddleware::new(
-        app.get_http_client()?,
-        ClientDriver::new(ClientInfo::thin(), params.secret_key)
+        app.get_http_client().await?,
+        driver.as_client()
     );
 
-    // Resolve server middlewire and driver
-    let middlewire = app.get_middlewire().await.unwrap();
-    let driver = middlewire.driver();
+    // Open ports if given
+    if !params.open_ports.is_empty() {
+        tokio::spawn(async move {
+            let duration = std::time::Duration::from_secs(3600);
+
+            let upnp = UpnpPortForwarder::new();
+
+            loop {
+                for port in params.open_ports.iter().copied() {
+                    if let Err(_err) = upnp.open(port, Protocol::TCP, duration).await {
+                        #[cfg(feature = "tracing")]
+                        tracing::error!("[server] Failed to open port {port} using UPnP forwarder: {_err}");
+                    }
+                }
+
+                tokio::time::sleep(duration).await;
+            }
+        });
+    }
 
     // Start the server
     tokio::spawn(async move {
-        if let Err(_err) = middlewire.serve(&params.local_address).await {
+        if let Err(_err) = middleware.serve(&params.local_address).await {
             #[cfg(feature = "tracing")]
             tracing::error!("[server] {_err}");
         }
@@ -50,10 +74,15 @@ where
 
         for address in &params.bootstrap {
             if let Ok(server) = traversal_client.get_info(&address).await {
-                driver.router().index_server(Server::new(
+                let _result = driver.router().index_server(Server::new(
                     server.public_key,
                     address
                 )).await;
+
+                #[cfg(feature = "tracing")]
+                if let Err(err) = _result {
+                    tracing::error!("[server] Failed to index bootstrap server: {err}");
+                }
             }
         }
 

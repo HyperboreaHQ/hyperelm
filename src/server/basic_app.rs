@@ -30,38 +30,46 @@ pub trait BasicServerApp {
     fn get_params(&self) -> ServerAppParams;
 }
 
-impl<T> ServerApp for T where T: BasicServerApp {
+#[async_trait::async_trait]
+impl<T> ServerApp for T where T: BasicServerApp + Send + Sync {
     type Router = GlobalTableRouter;
     type Traversal = BfsRecursionTraversal;
-    type MessagesInbox = BasicInbox;
+    type MessagesInbox = StoredQueueMessagesInbox;
 
     type HttpClient = ReqwestHttpClient;
     type HttpServer = AxumHttpServer;
 
-    type Error = ();
+    type Error = std::io::Error;
 
-    #[inline]
-    fn get_router(&self) -> Result<Self::Router, Self::Error>  {
-        Ok(GlobalTableRouter::default())
+    async fn get_router(&self) -> Result<Self::Router, Self::Error> {
+        let params = self.get_params();
+
+        let router = GlobalTableRouter::new(params.backend_folder.join("router")).await?;
+
+        Ok(router)
     }
 
     #[inline]
-    fn get_traversal(&self) -> Result<Self::Traversal, Self::Error>  {
+    async fn get_traversal(&self) -> Result<Self::Traversal, Self::Error> {
         Ok(BfsRecursionTraversal)
     }
 
     #[inline]
-    fn get_messages_inbox(&self) -> Result<Self::MessagesInbox, Self::Error>  {
-        Ok(BasicInbox::default())
+    async fn get_messages_inbox(&self) -> Result<Self::MessagesInbox, Self::Error> {
+        let params = self.get_params();
+
+        let inbox = StoredQueueMessagesInbox::new(params.backend_folder.join("inbox")).await?;
+
+        Ok(inbox)
     }
 
     #[inline]
-    fn get_http_client(&self) -> Result<Self::HttpClient, Self::Error>  {
+    async fn get_http_client(&self) -> Result<Self::HttpClient, Self::Error> {
         Ok(ReqwestHttpClient::default())
     }
 
     #[inline]
-    fn get_http_server(&self) -> Result<Self::HttpServer, Self::Error>  {
+    async fn get_http_server(&self) -> Result<Self::HttpServer, Self::Error> {
         Ok(AxumHttpServer::default())
     }
 

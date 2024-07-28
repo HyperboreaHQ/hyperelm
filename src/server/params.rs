@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use hyperborealib::crypto::asymmetric::SecretKey;
@@ -16,11 +17,18 @@ pub struct ServerAppParams {
     /// current server through the Internet.
     pub remote_address: String,
 
+    /// Path to the folder where the server middleware
+    /// saves its state.
+    pub backend_folder: PathBuf,
+
     /// Bootstrap addresses used to gather
     /// initial information about the network.
     /// 
     /// Usually some static server addresses.
     pub bootstrap: Vec<String>,
+
+    /// Open listed ports using available mechanisms.
+    pub open_ports: Vec<u16>,
 
     /// Announce current server to other servers.
     /// 
