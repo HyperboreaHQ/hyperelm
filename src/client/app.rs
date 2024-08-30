@@ -2,10 +2,10 @@ use serde_json::{json, Value as Json};
 
 use hyperborealib::exports::tokio;
 
-use hyperborealib::http::HttpClient;
-
 use hyperborealib::crypto::prelude::*;
 use hyperborealib::rest_api::prelude::*;
+
+use hyperborealib::http::HttpClient;
 
 use super::*;
 
@@ -61,7 +61,7 @@ pub trait ClientApp {
     fn get_state(&self) -> Arc<Self::State>;
 
     /// Get connected client middleware.
-    /// 
+    ///
     /// It is highly recommended to re-implement this method
     /// to reuse some local cache with some TTL.
     async fn get_connected_middleware(&self) -> Result<ConnectedClientMiddleware<Self::HttpClient>, ClientAppError<Self::Error>> {
@@ -173,18 +173,27 @@ pub trait ClientApp {
         Ok(())
     }
 
+    /// Try to poll a message from the connected hyperborea server.
+    async fn poll_message(&self) -> Result<Option<MessageInfo>, ClientAppError<Self::Error>> {
+        let params = self.get_params();
+
+        // Implementers should poll all available messages and store them
+        // in a queue, polling from it and fulfilling it when it becomes empty.
+        let (mut messages, _) = self.get_connected_middleware().await?
+            .poll(&params.channel, Some(1)).await?;
+
+        Ok(messages.pop())
+    }
+
     /// Receive and process incoming messages.
     async fn update(&self) -> Result<(), ClientAppError<Self::Error>> {
-        let params = self.get_params();
-        let middleware = self.get_connected_middleware().await?;
+        if let Some(message) = self.poll_message().await? {
+            let params = self.get_params();
 
-        let (messages, _) = middleware.poll(&params.channel, None).await?;
-
-        for message_info in messages {
             // Decode the message and verify its validity
-            let content = message_info.message.read(
+            let content = message.message.read(
                 &params.client_secret,
-                &message_info.sender.client.public_key
+                &message.sender.client.public_key
             )?;
 
             // Deserialize it and process
@@ -197,20 +206,20 @@ pub trait ClientApp {
                     let request = Self::InputRequest::from_json(request)?;
 
                     // Process request
-                    let response = self.handle_request(request, message_info.clone()).await?;
+                    let response = self.handle_request(request, message.clone()).await?;
 
                     // Send response
                     let response = Message::create(
                         &params.client_secret,
-                        &message_info.sender.client.public_key,
+                        &message.sender.client.public_key,
                         serde_json::to_vec(&response.to_json()?)?,
                         params.encoding,
                         params.compression_level
                     )?;
 
-                    middleware.send(
-                        &message_info.sender.server.address,
-                        message_info.sender.client.public_key,
+                    self.get_connected_middleware().await?.send(
+                        &message.sender.server.address,
+                        message.sender.client.public_key,
                         format!("{}@{request_id}", params.channel),
                         response
                     ).await?;
@@ -218,11 +227,11 @@ pub trait ClientApp {
             }
 
             // Handle message
-            else if let Some(message) = content.get("message") {
-                let message = Self::InputMessage::from_json(message)?;
+            else if let Some(request) = content.get("message") {
+                let request = Self::InputMessage::from_json(request)?;
 
                 // Process message
-                self.handle_message(message, message_info).await?;
+                self.handle_message(request, message).await?;
             }
         }
 
